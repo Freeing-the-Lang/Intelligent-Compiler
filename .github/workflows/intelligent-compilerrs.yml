@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write   # ★ Release 생성에 반드시 필요 ★
+
 jobs:
   build-test-run:
     runs-on: ${{ matrix.os }}
@@ -14,11 +17,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
+      # -------------------------------------------------
+      # Checkout
+      # -------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # LLM API Key 자동 로딩
+      # LLM API KEY 자동 로딩
       # -------------------------------------------------
       - name: Set LLM API Keys
         shell: bash
@@ -30,9 +36,9 @@ jobs:
       - name: Print LLM Key Loaded Status
         shell: bash
         run: |
-          echo "OpenAI Loaded? -> ${{ secrets.OPENAI_API_KEY != '' }}"
-          echo "DeepSeek Loaded? -> ${{ secrets.DEEPSEEK_API_KEY != '' }}"
-          echo "LLaMA URL Loaded? -> ${{ secrets.LLAMA_API_URL != '' }}"
+          echo "OpenAI Key Loaded? -> ${{ secrets.OPENAI_API_KEY != '' }}"
+          echo "DeepSeek Key Loaded? -> ${{ secrets.DEEPSEEK_API_KEY != '' }}"
+          echo "LLaMA URL Loaded?  -> ${{ secrets.LLAMA_API_URL != '' }}"
 
       # -------------------------------------------------
       # Rust Toolchain
@@ -70,7 +76,7 @@ jobs:
           cargo run || true
 
       # -------------------------------------------------
-      # SHA256 Proof — 안정 버전
+      # SHA256 Proof — 디렉토리 제외 완전 안전 버전
       # -------------------------------------------------
       - name: Generate SHA256 Proof (Linux/macOS)
         if: runner.os != 'Windows'
@@ -100,7 +106,7 @@ jobs:
           echo "LLM_LLAMA: ${{ secrets.LLAMA_API_URL != '' }}" >> build-info.txt
 
       # -------------------------------------------------
-      # Upload Artifacts
+      # Artifacts
       # -------------------------------------------------
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
