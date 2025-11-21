@@ -17,26 +17,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ----------------------------
-      # LLM API KEY 자동 로딩
-      # ----------------------------
-      - name: Set LLM API Keys from Secrets
+      # -------------------------------------------------
+      # LLM API Key 자동 로딩
+      # -------------------------------------------------
+      - name: Set LLM API Keys
         shell: bash
         run: |
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_ENV
           echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> $GITHUB_ENV
           echo "LLAMA_API_URL=${{ secrets.LLAMA_API_URL }}" >> $GITHUB_ENV
 
-      - name: Print Loaded Keys (masked)
+      - name: Print LLM Key Loaded Status
         shell: bash
         run: |
-          echo "Loaded OPENAI? -> ${{ secrets.OPENAI_API_KEY != '' }}"
-          echo "Loaded DEEPSEEK? -> ${{ secrets.DEEPSEEK_API_KEY != '' }}"
-          echo "Loaded LLAMA API URL? -> ${{ secrets.LLAMA_API_URL != '' }}"
+          echo "OpenAI Loaded? -> ${{ secrets.OPENAI_API_KEY != '' }}"
+          echo "DeepSeek Loaded? -> ${{ secrets.DEEPSEEK_API_KEY != '' }}"
+          echo "LLaMA URL Loaded? -> ${{ secrets.LLAMA_API_URL != '' }}"
 
-      # ----------------------------
+      # -------------------------------------------------
       # Rust Toolchain
-      # ----------------------------
+      # -------------------------------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -51,9 +51,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # ----------------------------
+      # -------------------------------------------------
       # Build & Test
-      # ----------------------------
+      # -------------------------------------------------
       - name: Build
         run: cargo build --release
 
@@ -66,12 +66,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           LLAMA_API_URL: ${{ secrets.LLAMA_API_URL }}
         run: |
-          echo "Running Intelligent-Compiler example..."
+          echo "Running Intelligent Compiler..."
           cargo run || true
 
-      # ----------------------------
-      # SHA256 Proof — 개선된 안정 버전
-      # ----------------------------
+      # -------------------------------------------------
+      # SHA256 Proof — 안정 버전
+      # -------------------------------------------------
       - name: Generate SHA256 Proof (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
@@ -86,9 +86,9 @@ jobs:
             certutil -hashfile "%%f" SHA256 >> proof-sha256.txt
           )
 
-      # ----------------------------
-      # Build Info
-      # ----------------------------
+      # -------------------------------------------------
+      # Build Info Ledger
+      # -------------------------------------------------
       - name: Create Build Info
         run: |
           echo "OS: ${{ runner.os }}" > build-info.txt
@@ -99,9 +99,9 @@ jobs:
           echo "LLM_DEEPSEEK: ${{ secrets.DEEPSEEK_API_KEY != '' }}" >> build-info.txt
           echo "LLM_LLAMA: ${{ secrets.LLAMA_API_URL != '' }}" >> build-info.txt
 
-      # ----------------------------
+      # -------------------------------------------------
       # Upload Artifacts
-      # ----------------------------
+      # -------------------------------------------------
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -111,12 +111,12 @@ jobs:
             proof-sha256.txt
             build-info.txt
 
-  # ----------------------------
-  # Release Packaging
-  # ----------------------------
+  # -----------------------------------------------------
+  # Release Job — main push 시 자동 실행
+  # -----------------------------------------------------
   release:
     needs: build-test-run
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -128,13 +128,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Zip All
+      - name: Zip Release Package
         run: |
           cd artifacts
           zip -r intelligent-compiler-release.zip .
 
-      - name: Release Upload
+      - name: Generate Release Name
+        id: relname
+        run: echo "name=v$(date +'%Y.%m.%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.relname.outputs.name }}
+          tag_name: ${{ steps.relname.outputs.name }}
           files: artifacts/intelligent-compiler-release.zip
 
