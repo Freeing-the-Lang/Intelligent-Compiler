@@ -257,3 +257,8 @@ impl<L: LLM + Clone> IntelligentCompilerAI<L> {
         )
     }
 }
+
+fn main() {
+    println!("Intelligent Compiler AI Engine ✓");
+}
+
