@@ -1,27 +1,25 @@
 // ==========================================================
 // INTELLIGENT-COMPILER FULLSTACK AI EDITION (ONE FILE)
-// AI TRANSPILER + FILE CONVERTER + PROJECT-WIDE CONVERTER
-// Windows auto-pause + Panic Catcher (절대 창 안 닫힘)
+// WITH AUTO API KEY SETUP + ADVANCED PROJECT TRANSPILER
 // ==========================================================
 
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io;
-use std::path::Path;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use serde_json::json;
 
 // ----------------------------------------------------------
-// PANIC CATCHER (윈도우에서 절대 창 안 닫히게 하는 핵심)
+// 1) PANIC CATCHER (창 자동 닫힘 방지)
 // ----------------------------------------------------------
 fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         println!("\n======================================");
-        println!("         PANIC OCCURRED");
+        println!("           PANIC OCCURRED");
         println!("======================================");
         println!("{:?}", info);
 
-        // Windows 강제 pause
         #[cfg(target_os = "windows")]
         {
             println!("\nPress any key to exit...");
@@ -37,6 +35,55 @@ fn install_panic_hook() {
             let _ = io::stdin().read_line(&mut s);
         }
     }));
+}
+
+// ==========================================================
+// 2) AUTO LOAD OR CREATE API KEY
+// ==========================================================
+fn load_or_create_api_key() -> String {
+    // 1) ENV
+    if let Ok(k) = env::var("OPENAI_API_KEY") {
+        if !k.trim().is_empty() {
+            return k;
+        }
+    }
+
+    // 2) .env
+    if let Ok(content) = fs::read_to_string(".env") {
+        for line in content.lines() {
+            if line.starts_with("OPENAI_API_KEY=") {
+                let key = line.replace("OPENAI_API_KEY=", "");
+                if !key.trim().is_empty() {
+                    return key.trim().into();
+                }
+            }
+        }
+    }
+
+    // 3) 없으면 사용자 입력
+    println!("=================================================");
+    println!(" OPENAI_API_KEY not found.");
+    println!(" Please enter your OpenAI API Key:");
+    println!("=================================================");
+
+    print!("API KEY > ");
+    io::stdout().flush().unwrap();
+
+    let mut key = String::new();
+    io::stdin().read_line(&mut key).unwrap();
+    let key = key.trim().to_string();
+
+    if key.is_empty() {
+        println!("ERROR: API KEY cannot be empty. Exiting...");
+        return "".into();
+    }
+
+    // 저장
+    let env_file = format!("OPENAI_API_KEY={}", key);
+    fs::write(".env", env_file).unwrap();
+
+    println!("API KEY saved to .env.");
+    key
 }
 
 // ==========================================================
@@ -64,14 +111,14 @@ impl Node {
 }
 
 // ==========================================================
-// LLM INTERFACE
+// LLM BASE TRAIT
 // ==========================================================
 pub trait LLM {
     fn predict(&self, prompt: &str) -> String;
 }
 
 // ==========================================================
-// REAL LLM (OPENAI GPT) WITH AUTO API KEY DETECTION
+// REAL OPENAI CLIENT
 // ==========================================================
 #[derive(Clone)]
 pub struct RealLLM {
@@ -80,34 +127,23 @@ pub struct RealLLM {
 
 impl RealLLM {
     pub fn new() -> Self {
-        if let Ok(v) = env::var("OPENAI_API_KEY") {
-            if !v.is_empty() { return Self { api_key: v }; }
-        }
-
-        if let Ok(content) = fs::read_to_string(".env") {
-            for line in content.lines() {
-                if line.starts_with("OPENAI_API_KEY=") {
-                    let key = line.split('=').nth(1).unwrap_or("").to_string();
-                    if !key.is_empty() {
-                        return Self { api_key: key };
-                    }
-                }
-            }
-        }
-
-        Self { api_key: "".into() }
+        // AUTO API KEY SYSTEM 사용
+        let key = load_or_create_api_key();
+        Self { api_key: key }
     }
 
     fn request(&self, prompt: &str) -> String {
         if self.api_key.is_empty() {
-            return "(ERROR: OPENAI_API_KEY missing. Create .env or export.)".into();
+            return "(ERROR: OPENAI_API_KEY missing.)".into();
         }
 
         let client = reqwest::blocking::Client::new();
 
         let body = json!({
             "model": "gpt-4.1",
-            "messages": [{ "role": "user", "content": prompt }]
+            "messages": [
+                { "role": "user", "content": prompt }
+            ]
         });
 
         let res = client
@@ -145,18 +181,20 @@ pub struct VersionAI {
 impl VersionAI {
     pub fn new() -> Self {
         let mut m = HashMap::new();
-        m.insert("go".into(), vec!["1.18", "1.20", "1.21"]);
-        m.insert("cpp".into(), vec!["17", "20", "23"]);
-        m.insert("swift".into(), vec!["5.9", "6.0"]);
+        m.insert("go".into(), vec!["1.21"]);
+        m.insert("cpp".into(), vec!["23"]);
+        m.insert("swift".into(), vec!["6.0"]);
         Self { map: m }
     }
 
     pub fn infer(&self, lang: &str, node: &Node) -> String {
-        if lang == "go" && node.meta.get("uses_generics") == Some(&"true".into()) {
-            return "1.21".into();
+        if lang == "go" {
+            if node.meta.get("uses_generics") == Some(&"true".to_string()) {
+                return "1.21".into();
+            }
         }
-
-        self.map.get(lang)
+        self.map
+            .get(lang)
             .and_then(|v| v.last())
             .unwrap_or(&"unknown")
             .to_string()
@@ -166,11 +204,11 @@ impl VersionAI {
 // ==========================================================
 // SEMANTIC ENGINE
 // ==========================================================
+pub struct SemanticEngine;
+
 pub struct SemanticInfo {
     pub meaning: String,
 }
-
-pub struct SemanticEngine;
 
 impl SemanticEngine {
     pub fn analyze(&self, node: &Node) -> SemanticInfo {
@@ -186,41 +224,17 @@ impl SemanticEngine {
 // ==========================================================
 // SECURITY AI
 // ==========================================================
-pub struct SecurityRule {
-    pub name: &'static str,
-    pub detect: fn(&Node) -> bool,
-}
-
 pub struct SecurityAI<L: LLM> {
     pub llm: L,
-    pub rules: Vec<SecurityRule>,
 }
 
 impl<L: LLM> SecurityAI<L> {
-    pub fn new(llm: L) -> Self {
-        Self {
-            llm,
-            rules: vec![
-                SecurityRule {
-                    name: "POINTER_ARITH",
-                    detect: |n| n.meta.get("pointer_arith") == Some(&"true".into()),
-                }
-            ]
-        }
-    }
+    pub fn new(llm: L) -> Self { Self { llm } }
 
     pub fn analyze(&self, node: &Node) -> Vec<String> {
-        let mut out = vec![];
-
-        for r in &self.rules {
-            if (r.detect)(node) {
-                out.push(r.name.into());
-            }
-        }
-
-        out.push(self.llm.predict(&format!("Security check: {:?}", node)));
-
-        out
+        vec![
+            self.llm.predict(&format!("Security check for node: {:?}", node))
+        ]
     }
 }
 
@@ -234,12 +248,10 @@ impl BaseGenerator {
         match &node.kind {
             NodeKind::Identifier(x) => match lang {
                 "go" => format!("var {} any", x),
-                "swift" => format!("var {}: Any", x),
                 "cpp" => format!("auto {};", x),
-                "rust" => format!("let {};", x),
-                _ => x.into(),
+                "swift" => format!("var {}: Any", x),
+                _ => format!("{}", x),
             },
-
             _ => "/* unsupported */".into(),
         }
     }
@@ -248,14 +260,12 @@ impl BaseGenerator {
 // ==========================================================
 // LLM REFINER
 // ==========================================================
-pub struct LLMGenerator<L: LLM> {
-    pub llm: L,
-}
+pub struct LLMGenerator<L: LLM> { pub llm: L }
 
 impl<L: LLM> LLMGenerator<L> {
     pub fn refine(&self, lang: &str, version: &str, code: &str) -> String {
         self.llm.predict(
-            &format!("Rewrite as valid, idiomatic {} {} code:\n{}", lang, version, code)
+            &format!("Rewrite in idiomatic {} {} code:\n{}", lang, version, code)
         )
     }
 }
@@ -263,20 +273,58 @@ impl<L: LLM> LLMGenerator<L> {
 // ==========================================================
 // FILE TRANSPILER
 // ==========================================================
-pub fn transpile_source<L: LLM>(llm: &L, src: &str, lang: &str) -> String {
-    llm.predict(&format!("Transpile entire source to {}:\n{}", lang, src))
+pub fn transpile_file<L: LLM>(llm: &L, src: &str, lang: &str) -> String {
+    llm.predict(&format!("Transpile to {}:\n{}", lang, src))
 }
 
 // ==========================================================
-// DIRECTORY TRANSPILER
+// 5) ADVANCED PROJECT DIRECTORY TRANSPILER
 // ==========================================================
-pub fn transpile_directory<L: LLM>(
+
+// 기본적으로 변환하지 않을 폴더
+fn should_skip_dir(path: &Path) -> bool {
+    let skip_list = [
+        ".git",
+        "target",
+        "build",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        ".vscode",
+    ];
+
+    skip_list.iter().any(|&name| path.ends_with(name))
+}
+
+// 변환할 파일 확장자
+fn is_convertible_file(path: &Path) -> bool {
+    if let Some(ext) = path.extension() {
+        let e = ext.to_string_lossy().to_lowercase();
+        return matches!(e.as_str(), "rs" | "cpp" | "h" | "c" | "py" | "go" | "ts" | "js" | "swift");
+    }
+    false
+}
+
+// 언어별 변환된 확장자
+fn mapped_ext(lang: &str) -> &'static str {
+    match lang {
+        "go" => "go",
+        "cpp" => "cpp",
+        "swift" => "swift",
+        "rust" => "rs",
+        "python" => "py",
+        _ => "txt",
+    }
+}
+
+pub fn transpile_project<L: LLM>(
     llm: &L,
     src_dir: &str,
     out_dir: &str,
-    lang: &str
+    lang: &str,
 ) {
-    fs::create_dir_all(out_dir).unwrap_or(());
+    println!("\n--- PROJECT TRANSPILER START ---");
+    fs::create_dir_all(out_dir).unwrap();
 
     fn walk<L: LLM>(llm: &L, src: &Path, out: &Path, lang: &str) {
         for entry in fs::read_dir(src).unwrap() {
@@ -284,40 +332,39 @@ pub fn transpile_directory<L: LLM>(
             let path = entry.path();
 
             if path.is_dir() {
+                if should_skip_dir(&path) {
+                    println!("[SKIP] directory: {}", path.display());
+                    continue;
+                }
+
                 let next = out.join(entry.file_name());
                 fs::create_dir_all(&next).unwrap_or(());
                 walk(llm, &path, &next, lang);
-                continue;
-            }
+            } else if path.is_file() {
+                if !is_convertible_file(&path) {
+                    println!("[IGNORE] {}", path.display());
+                    continue;
+                }
 
-            if path.is_file() {
+                println!("[CONVERT] {}", path.display());
                 let content = fs::read_to_string(&path).unwrap_or_default();
 
                 let code = llm.predict(
-                    &format!("Transpile to {}:\n{}", lang, content)
+                    &format!("Transpile fully into {} code:\n{}", lang, content)
                 );
 
-                let ext = match lang {
-                    "go" => "go",
-                    "cpp" => "cpp",
-                    "swift" => "swift",
-                    "python" => "py",
-                    "rust" => "rs",
-                    _ => "txt",
-                };
-
-                let out_path = out.join(format!(
+                let newname = format!(
                     "{}.{}",
                     path.file_name().unwrap().to_string_lossy(),
-                    ext
-                ));
-
-                fs::write(out_path, code).unwrap_or(());
+                    mapped_ext(lang)
+                );
+                fs::write(out.join(newname), code).unwrap_or(());
             }
         }
     }
 
     walk(llm, Path::new(src_dir), Path::new(out_dir), lang);
+    println!("--- PROJECT TRANSPILER DONE ---");
 }
 
 // ==========================================================
@@ -349,18 +396,18 @@ impl<L: LLM + Clone> Compiler<L> {
 
         format!(
             "=== Intelligent Compiler ===\n\
-            Language: {}\nVersion: {}\nMeaning: {}\n\n\
-            Base:\n{}\n\nAI Refined:\n{}\n\nSecurity:\n{:?}",
+             Language: {}\nVersion: {}\nMeaning: {}\n\n\
+             Base:\n{}\n\nAI Refined:\n{}\n\nSecurity:\n{:?}",
             lang, ver, sem.meaning, base, refined, sec
         )
     }
 }
 
 // ==========================================================
-// MAIN (절대 닫히지 않는 버전)
+// MAIN
 // ==========================================================
 fn main() {
-    install_panic_hook(); // <<< 윈도우 자동 닫힘 방지의 핵심
+    install_panic_hook();
 
     println!("==============================================");
     println!("        INTELLIGENT COMPILER AI ENGINE");
@@ -369,26 +416,22 @@ fn main() {
     let llm = RealLLM::new();
     let compiler = Compiler::new(llm.clone());
 
-    // Node test
+    // Test Node
     let mut node = Node::new(NodeKind::Identifier("x".into()));
     node.meta.insert("uses_generics".into(), "true".into());
     println!("{}", compiler.compile_node(&node, "go"));
 
-    // File transpile test
+    // Test File
     println!("\n=== FILE TRANSPILER ===");
-    let sample = r#"
-    fn add(a: i32, b: i32) -> i32 { a + b }
-    "#;
-    println!("{}", transpile_source(&llm, sample, "go"));
+    let sample = "fn add(a: i32, b: i32) -> i32 { a + b }";
+    println!("{}", transpile_file(&llm, sample, "go"));
 
-    // Directory transpile test
-    println!("\n=== PROJECT TRANSPILER START ===");
-    transpile_directory(&llm, "src", "output_go", "go");
-    println!("=== PROJECT TRANSPILER DONE ===");
+    // Test Project
+    println!("\n=== PROJECT TRANSPILER ===");
+    transpile_project(&llm, "src", "output_go", "go");
 
     println!("\nFINISHED.");
 
-    // ------------- STOP WINDOW AUTO CLOSE -------------
     #[cfg(target_os = "windows")]
     {
         println!("Press any key to exit...");
@@ -404,4 +447,3 @@ fn main() {
         let _ = io::stdin().read_line(&mut s);
     }
 }
-
