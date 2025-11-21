@@ -1,8 +1,7 @@
 // ==========================================================
 // INTELLIGENT-COMPILER FULLSTACK AI EDITION (ONE FILE)
 // AI TRANSPILER + FILE CONVERTER + PROJECT-WIDE CONVERTER
-// Version AI + Semantic AI + Security AI + LLM CodeGen
-// Windows auto-pause fixed
+// Windows auto-pause + Panic Catcher (절대 창 안 닫힘)
 // ==========================================================
 
 use std::collections::HashMap;
@@ -11,6 +10,34 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use serde_json::json;
+
+// ----------------------------------------------------------
+// PANIC CATCHER (윈도우에서 절대 창 안 닫히게 하는 핵심)
+// ----------------------------------------------------------
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        println!("\n======================================");
+        println!("         PANIC OCCURRED");
+        println!("======================================");
+        println!("{:?}", info);
+
+        // Windows 강제 pause
+        #[cfg(target_os = "windows")]
+        {
+            println!("\nPress any key to exit...");
+            let _ = std::process::Command::new("cmd")
+                .args(&["/C", "pause"])
+                .status();
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            println!("\nPress ENTER to exit...");
+            let mut s = String::new();
+            let _ = io::stdin().read_line(&mut s);
+        }
+    }));
+}
 
 // ==========================================================
 // AST STRUCTURES
@@ -53,14 +80,10 @@ pub struct RealLLM {
 
 impl RealLLM {
     pub fn new() -> Self {
-        // 1) ENV VAR
         if let Ok(v) = env::var("OPENAI_API_KEY") {
-            if !v.is_empty() {
-                return Self { api_key: v };
-            }
+            if !v.is_empty() { return Self { api_key: v }; }
         }
 
-        // 2) .env AUTO LOAD
         if let Ok(content) = fs::read_to_string(".env") {
             for line in content.lines() {
                 if line.starts_with("OPENAI_API_KEY=") {
@@ -122,7 +145,7 @@ pub struct VersionAI {
 impl VersionAI {
     pub fn new() -> Self {
         let mut m = HashMap::new();
-        m.insert("go".into(), vec!["1.18", "1.20", "1.21", "1.22"]);
+        m.insert("go".into(), vec!["1.18", "1.20", "1.21"]);
         m.insert("cpp".into(), vec!["17", "20", "23"]);
         m.insert("swift".into(), vec!["5.9", "6.0"]);
         Self { map: m }
@@ -132,6 +155,7 @@ impl VersionAI {
         if lang == "go" && node.meta.get("uses_generics") == Some(&"true".into()) {
             return "1.21".into();
         }
+
         self.map.get(lang)
             .and_then(|v| v.last())
             .unwrap_or(&"unknown")
@@ -195,6 +219,7 @@ impl<L: LLM> SecurityAI<L> {
         }
 
         out.push(self.llm.predict(&format!("Security check: {:?}", node)));
+
         out
     }
 }
@@ -243,7 +268,7 @@ pub fn transpile_source<L: LLM>(llm: &L, src: &str, lang: &str) -> String {
 }
 
 // ==========================================================
-// DIRECTORY-WIDE TRANSPILER
+// DIRECTORY TRANSPILER
 // ==========================================================
 pub fn transpile_directory<L: LLM>(
     llm: &L,
@@ -325,16 +350,18 @@ impl<L: LLM + Clone> Compiler<L> {
         format!(
             "=== Intelligent Compiler ===\n\
             Language: {}\nVersion: {}\nMeaning: {}\n\n\
-            Base:\n{}\n\nAI:\n{}\n\nSecurity:\n{:?}",
+            Base:\n{}\n\nAI Refined:\n{}\n\nSecurity:\n{:?}",
             lang, ver, sem.meaning, base, refined, sec
         )
     }
 }
 
 // ==========================================================
-// MAIN (WITH WINDOWS AUTO-PAUSE)
+// MAIN (절대 닫히지 않는 버전)
 // ==========================================================
 fn main() {
+    install_panic_hook(); // <<< 윈도우 자동 닫힘 방지의 핵심
+
     println!("==============================================");
     println!("        INTELLIGENT COMPILER AI ENGINE");
     println!("==============================================");
@@ -350,7 +377,7 @@ fn main() {
     // File transpile test
     println!("\n=== FILE TRANSPILER ===");
     let sample = r#"
-        fn add(a: i32, b: i32) -> i32 { a + b }
+    fn add(a: i32, b: i32) -> i32 { a + b }
     "#;
     println!("{}", transpile_source(&llm, sample, "go"));
 
@@ -359,15 +386,15 @@ fn main() {
     transpile_directory(&llm, "src", "output_go", "go");
     println!("=== PROJECT TRANSPILER DONE ===");
 
-    // ---- Windows Fix: Prevent auto-close ----
-    println!("\nExecution finished.");
+    println!("\nFINISHED.");
 
+    // ------------- STOP WINDOW AUTO CLOSE -------------
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        println!("Press any key to exit...");
+        let _ = std::process::Command::new("cmd")
             .args(&["/C", "pause"])
-            .status()
-            .unwrap();
+            .status();
     }
 
     #[cfg(not(target_os = "windows"))]
