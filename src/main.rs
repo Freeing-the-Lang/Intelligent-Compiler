@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 
 // ======================================================
 // AST 구조
@@ -29,14 +30,13 @@ impl Node {
 }
 
 // ======================================================
-// LLM 인터페이스
+// LLM 인터페이스 + Local LLM 구현
 // ======================================================
 
 pub trait LLM {
     fn predict(&self, prompt: &str) -> String;
 }
 
-// 예시 LLM 구현 (실제 연결 가능)
 pub struct LocalLLM {}
 
 impl LLM for LocalLLM {
@@ -75,7 +75,6 @@ impl VersionAI {
             None => return "unknown".to_string(),
         };
 
-        // 의미 기반 휴리스틱 + meta 기반 감지
         if node.meta.get("uses_generics") == Some(&"true".to_string()) && lang == "go" {
             return "1.21".to_string();
         }
@@ -88,13 +87,12 @@ impl VersionAI {
             return "6.0".to_string();
         }
 
-        // 기본: 최신 버전
         versions.last().unwrap().to_string()
     }
 }
 
 // ======================================================
-// 시멘틱 엔진 (의미 기반 분석 + 기본 트랜스파일)
+// 시멘틱 엔진 (의미 분석 + 기본 트랜스파일)
 // ======================================================
 
 pub struct SemanticEngineAI {}
@@ -121,13 +119,13 @@ impl SemanticEngineAI {
                 safety: vec![],
             },
             NodeKind::BinaryOp { op, .. } => SemanticInfo {
-                meaning: format!("binary op '{}'", op),
+                meaning: format!("binary-operation '{}'", op),
                 types: vec!["computed-number".to_string()],
                 safety: vec![],
             },
             NodeKind::Function { name, .. } => SemanticInfo {
                 meaning: format!("function '{}'", name),
-                types: vec!["fn".to_string()],
+                types: vec!["function".to_string()],
                 safety: vec![],
             },
             _ => SemanticInfo {
@@ -138,13 +136,13 @@ impl SemanticEngineAI {
         }
     }
 
-    pub fn to_target(&self, node: &Node, lang_version: &str) -> String {
-        format!("// base transpiled {} code for node {:?}", lang_version, node)
+    pub fn to_target(&self, node: &Node, version: &str) -> String {
+        format!("// base transpiled {} code for node {:?}", version, node)
     }
 }
 
 // ======================================================
-// 보안 규칙 자동 감지기 (AI + 시그니처)
+// 보안 규칙 자동 감지기 (AI + 시그니처 기반)
 // ======================================================
 
 pub struct SecurityRule {
@@ -163,12 +161,12 @@ impl<L: LLM> SecurityAI<L> {
         let rules = vec![
             SecurityRule {
                 name: "POINTER_ARITH",
-                description: "Pointer arithmetic unsafe",
+                description: "Potential unsafe pointer arithmetic.",
                 detect: |n: &Node| n.meta.get("pointer_arith") == Some(&"true".to_string()),
             },
             SecurityRule {
                 name: "NUMERIC_OVERFLOW",
-                description: "Possible overflow",
+                description: "Risk of numeric overflow.",
                 detect: |n: &Node| n.meta.get("overflow_risk") == Some(&"true".to_string()),
             },
         ];
@@ -181,25 +179,22 @@ impl<L: LLM> SecurityAI<L> {
 
         for rule in self.rules.iter() {
             if (rule.detect)(node) {
-                out.push(format!("{}", rule.name));
+                out.push(rule.name.to_string());
             }
         }
 
         let prompt = format!(
-            "Analyze security issues for node:\n{:?}\n\
-             Consider TR-24772, CERT C, MISRA, memory safety, concurrency safety.",
+            "Analyze this AST for security issues (TR-24772, CERT, MISRA): {:?}",
             node
         );
 
-        let llm_result = self.llm.predict(&prompt);
-
-        out.push(format!("LLM: {}", llm_result));
+        out.push(format!("LLM: {}", self.llm.predict(&prompt)));
         out
     }
 }
 
 // ======================================================
-// 모든 기능 통합: Intelligent-Compiler 올인원
+// Intelligent Compiler 통합 엔진
 // ======================================================
 
 pub struct IntelligentCompilerAI<L: LLM> {
@@ -220,25 +215,17 @@ impl<L: LLM + Clone> IntelligentCompilerAI<L> {
     }
 
     pub fn compile(&self, node: &Node, lang: &str) -> String {
-        // 1) 언어 버전 AI 자동 추론
         let version = self.version_ai.infer_version(lang, node);
-
-        // 2) 의미 분석
         let semantic_info = self.semantic.analyze_meaning(node);
-
-        // 3) 기본 트랜스파일
-        let transpiled = self.semantic.to_target(node, &version);
-
-        // 4) 보안 위반 감지 (AI + 규칙)
+        let base_output = self.semantic.to_target(node, &version);
         let security_report = self.security.analyze(node);
 
-        // 5) LLM 코드 생성
-        let llm_prompt = format!(
-            "Generate {} {} code for AST: {:?}\nMeaning: {}",
+        let prompt = format!(
+            "Generate {} {} code for AST {:?}, meaning={}",
             lang, version, node, semantic_info.meaning
         );
 
-        let llm_code = self.llm.predict(&llm_prompt);
+        let llm_code = self.llm.predict(&prompt);
 
         format!(
             "=== Intelligent Compiler Output ===\n\
@@ -247,18 +234,39 @@ impl<L: LLM + Clone> IntelligentCompilerAI<L> {
              Meaning: {}\n\n\
              Base Transpile:\n{}\n\n\
              LLM Code:\n{}\n\n\
-             Security Issues:\n{:?}\n",
+             Security:\n{:?}",
             lang,
             version,
             semantic_info.meaning,
-            transpiled,
+            base_output,
             llm_code,
             security_report
         )
     }
 }
 
-fn main() {
-    println!("Intelligent Compiler AI Engine ✓");
-}
+// ======================================================
+// 메인 함수 (창 닫힘 방지 + 엔진 테스트)
+// ======================================================
 
+fn main() {
+    println!("==============================================");
+    println!("        Intelligent Compiler AI Engine");
+    println!("==============================================");
+
+    // 테스트용 AST 노드
+    let mut node = Node::new(NodeKind::Identifier("x".into()));
+    node.meta.insert("uses_generics".into(), "true".to_string());
+
+    let llm = LocalLLM {};
+    let compiler = IntelligentCompilerAI::new(llm);
+
+    let result = compiler.compile(&node, "go");
+
+    println!("\n------------ Compiler Output ----------------");
+    println!("{}", result);
+
+    println!("\nPress ENTER to exit...");
+    let mut s = String::new();
+    let _ = io::stdin().read_line(&mut s);
+}
