@@ -1,9 +1,23 @@
 [package]
-name = "intelligent_compiler"
+name = "intelligent_compiler_fullstack"
 version = "0.1.0"
 edition = "2021"
+authors = ["Freeing-the-Lang Ecosystem"]
+description = "Intelligent Compiler AI Engine (Fullstack Edition: LLM + AST + Semantic + Security + Advanced Directory Transpiler)"
+license = "MIT"
 
 [dependencies]
-reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# LLM API 호출용
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+
+# 파일 경로, 디렉토리 처리
+walkdir = "2.5"
+
+# 필요시 수준 높은 오류 출력 (선택)
+anyhow = "1.0"
+
+# 입력 처리 향상 (선택)
+clicolors-control = "1.0"
