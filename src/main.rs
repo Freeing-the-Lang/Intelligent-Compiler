@@ -1,14 +1,19 @@
 // ==========================================================
-// INTELLIGENT-COMPILER FULL STACK ALL-IN-ONE EDITION
-// AI SEMANTICS + VERSION AI + SECURITY + RULE CODEGEN + LLM
+// INTELLIGENT-COMPILER FULLSTACK AI EDITION (ONE FILE)
+// AI TRANSPILER + FILE CONVERTER + PROJECT-WIDE CONVERTER
+// Version AI + Semantic AI + Security AI + LLM CodeGen
 // ==========================================================
 
 use std::collections::HashMap;
 use std::io;
+use std::env;
+use std::fs;
+use std::path::Path;
+use serde_json::json;
 
-// ----------------------------------------------------------
-// AST 정의
-// ----------------------------------------------------------
+// ==========================================================
+// AST STRUCTURES
+// ==========================================================
 #[derive(Debug, Clone)]
 pub enum NodeKind {
     Identifier(String),
@@ -26,97 +31,134 @@ pub struct Node {
 
 impl Node {
     pub fn new(kind: NodeKind) -> Self {
-        Self {
-            kind,
-            meta: HashMap::new(),
-        }
+        Self { kind, meta: HashMap::new() }
     }
 }
 
-// ----------------------------------------------------------
-// LLM 인터페이스 + Local LLM
-// ----------------------------------------------------------
+// ==========================================================
+// LLM BASE TRAIT
+// ==========================================================
 pub trait LLM {
     fn predict(&self, prompt: &str) -> String;
 }
 
+// ==========================================================
+// REAL LLM (OpenAI GPT) WITH AUTO API KEY DETECTION
+// ==========================================================
 #[derive(Clone)]
-pub struct LocalLLM {}
+pub struct RealLLM {
+    pub api_key: String,
+}
 
-impl LLM for LocalLLM {
-    fn predict(&self, prompt: &str) -> String {
-        format!("LLM_OUTPUT({})", prompt)
+impl RealLLM {
+    pub fn new() -> Self {
+        // 1) 환경변수
+        if let Ok(v) = env::var("OPENAI_API_KEY") {
+            if !v.is_empty() { return Self { api_key: v }; }
+        }
+
+        // 2) .env 파일 자동 로딩
+        if let Ok(content) = fs::read_to_string(".env") {
+            for line in content.lines() {
+                if line.starts_with("OPENAI_API_KEY=") {
+                    let key = line.split('=').nth(1).unwrap_or("").to_string();
+                    if !key.is_empty() { return Self { api_key: key }; }
+                }
+            }
+        }
+
+        Self { api_key: "".into() }
+    }
+
+    fn request(&self, prompt: &str) -> String {
+        if self.api_key.is_empty() {
+            return "(ERROR: OPENAI_API_KEY missing. Create .env or export.)".into();
+        }
+
+        let client = reqwest::blocking::Client::new();
+
+        let body = json!({
+            "model": "gpt-4.1",
+            "messages": [{"role": "user", "content": prompt}]
+        });
+
+        let res = client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&body)
+            .send();
+
+        match res {
+            Ok(r) => {
+                let v: serde_json::Value = r.json().unwrap_or(json!({}));
+                v["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("(EMPTY)")
+                    .to_string()
+            }
+            Err(e) => format!("(API ERROR: {})", e),
+        }
     }
 }
 
-// ----------------------------------------------------------
-// 버전 자동 추론 엔진
-// ----------------------------------------------------------
+impl LLM for RealLLM {
+    fn predict(&self, prompt: &str) -> String {
+        self.request(prompt)
+    }
+}
+
+// ==========================================================
+// VERSION AI
+// ==========================================================
 pub struct VersionAI {
-    pub knowledge: HashMap<String, Vec<&'static str>>,
+    map: HashMap<String, Vec<&'static str>>,
 }
 
 impl VersionAI {
     pub fn new() -> Self {
-        let mut k = HashMap::new();
-        k.insert("go".into(), vec!["1.18", "1.20", "1.21", "1.22"]);
-        k.insert("cpp".into(), vec!["17", "20", "23"]);
-        k.insert("swift".into(), vec!["5.9", "6.0"]);
-        Self { knowledge: k }
+        let mut m = HashMap::new();
+        m.insert("go".into(), vec!["1.18", "1.20", "1.21", "1.22"]);
+        m.insert("cpp".into(), vec!["17", "20", "23"]);
+        m.insert("swift".into(), vec!["5.9", "6.0"]);
+        Self { map: m }
     }
 
     pub fn infer(&self, lang: &str, node: &Node) -> String {
-        let Some(versions) = self.knowledge.get(lang) else {
-            return "unknown".to_string();
+        let Some(v) = self.map.get(lang) else {
+            return "unknown".into();
         };
 
         if lang == "go" && node.meta.get("uses_generics") == Some(&"true".into()) {
             return "1.21".into();
         }
 
-        versions.last().unwrap().to_string()
+        v.last().unwrap().to_string()
     }
 }
 
-// ----------------------------------------------------------
-// 의미 분석(시멘틱)
-// ----------------------------------------------------------
+// ==========================================================
+// SEMANTIC ENGINE
+// ==========================================================
 pub struct SemanticInfo {
     pub meaning: String,
-    pub types: Vec<String>,
 }
 
 pub struct SemanticEngine;
+
 impl SemanticEngine {
     pub fn analyze(&self, node: &Node) -> SemanticInfo {
         match &node.kind {
             NodeKind::Identifier(x) => SemanticInfo {
                 meaning: format!("identifier '{}'", x),
-                types: vec!["dynamic".into()],
             },
-            NodeKind::Number(_) => SemanticInfo {
-                meaning: "number literal".into(),
-                types: vec!["number".into()],
-            },
-            NodeKind::BinaryOp { op, .. } => SemanticInfo {
-                meaning: format!("binary op '{}'", op),
-                types: vec!["number".into()],
-            },
-            NodeKind::Function { name, .. } => SemanticInfo {
-                meaning: format!("function '{}'", name),
-                types: vec!["fn".into()],
-            },
-            _ => SemanticInfo {
-                meaning: "unknown".into(),
-                types: vec![],
-            },
+            _ => SemanticInfo { meaning: "unknown".into() }
         }
     }
 }
 
-// ----------------------------------------------------------
-// 보안 검사기
-// ----------------------------------------------------------
+// ==========================================================
+// SECURITY AI
+// ==========================================================
 pub struct SecurityRule {
     pub name: &'static str,
     pub detect: fn(&Node) -> bool,
@@ -129,36 +171,32 @@ pub struct SecurityAI<L: LLM> {
 
 impl<L: LLM> SecurityAI<L> {
     pub fn new(llm: L) -> Self {
-        let rules = vec![
-            SecurityRule {
-                name: "POINTER_ARITH",
-                detect: |n| n.meta.get("pointer_arith") == Some(&"true".into()),
-            },
-        ];
-        Self { llm, rules }
+        Self {
+            llm,
+            rules: vec![
+                SecurityRule {
+                    name: "POINTER_ARITH",
+                    detect: |n| n.meta.get("pointer_arith") == Some(&"true".into()),
+                }
+            ]
+        }
     }
 
     pub fn analyze(&self, node: &Node) -> Vec<String> {
-        let mut output = vec![];
-
+        let mut out = vec![];
         for r in &self.rules {
             if (r.detect)(node) {
-                output.push(r.name.into());
+                out.push(r.name.into());
             }
         }
-
-        output.push(format!(
-            "LLM: {}",
-            self.llm.predict(&format!("Analyze security of {:?}", node))
-        ));
-
-        output
+        out.push(self.llm.predict(&format!("Security check: {:?}", node)));
+        out
     }
 }
 
-// ----------------------------------------------------------
-// 규칙 기반 코드 생성기 (문법 100% 정확)
-// ----------------------------------------------------------
+// ==========================================================
+// BASE CODE GENERATOR (RULE-BASED)
+// ==========================================================
 pub struct BaseGenerator;
 
 impl BaseGenerator {
@@ -166,118 +204,153 @@ impl BaseGenerator {
         match &node.kind {
             NodeKind::Identifier(x) => match lang {
                 "go" => format!("var {} any", x),
-                "cpp" => format!("auto {};", x),
                 "swift" => format!("var {}: Any", x),
+                "cpp" => format!("auto {};", x),
                 "rust" => format!("let {};", x),
                 _ => x.into(),
             },
-
-            NodeKind::Number(n) => format!("{}", n),
-
-            NodeKind::BinaryOp { op, left, right } => {
-                let l = self.generate(left, lang);
-                let r = self.generate(right, lang);
-                format!("{} {} {}", l, op, r)
-            }
-
-            NodeKind::Function { name, args, body } => {
-                let a = args.join(", ");
-                let b = body
-                    .iter()
-                    .map(|n| self.generate(n, lang))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                match lang {
-                    "go" => format!("func {}({}) {{\n{}\n}}", name, a, b),
-                    "cpp" => format!("auto {}({}) {{\n{}\n}}", name, a, b),
-                    "swift" => format!("func {}({}) {{\n{}\n}}", name, a, b),
-                    "rust" => format!("fn {}({}) {{\n{}\n}}", name, a, b),
-                    _ => format!("fn {}({}) {{\n{}\n}}", name, a, b),
-                }
-            }
 
             _ => "/* unsupported */".into(),
         }
     }
 }
 
-// ----------------------------------------------------------
-// LLM 기반 고레벨 코드 정제기
-// ----------------------------------------------------------
+// ==========================================================
+// AI REFINER
+// ==========================================================
 pub struct LLMGenerator<L: LLM> {
     pub llm: L,
 }
 
 impl<L: LLM> LLMGenerator<L> {
     pub fn refine(&self, lang: &str, version: &str, code: &str) -> String {
-        self.llm.predict(&format!(
-            "Refine this {} {} code into correct, modern code:\n{}",
-            lang, version, code
-        ))
+        self.llm.predict(
+            &format!("Rewrite as valid, idiomatic {} {} code:\n{}", lang, version, code)
+        )
     }
 }
 
-// ----------------------------------------------------------
-// 전체 컴파일러 엔진
-// ----------------------------------------------------------
-pub struct IntelligentCompiler<L: LLM + Clone> {
+// ==========================================================
+// FILE TRANSPILER
+// ==========================================================
+pub fn transpile_source<L: LLM>(llm: &L, src: &str, lang: &str) -> String {
+    llm.predict(
+        &format!("Transpile entire source to {}:\n{}", lang, src)
+    )
+}
+
+// ==========================================================
+// PROJECT-WIDE (DIRECTORY) TRANSPILER
+// ==========================================================
+pub fn transpile_directory<L: LLM>(
+    llm: &L,
+    src_dir: &str,
+    out_dir: &str,
+    lang: &str
+) {
+    fs::create_dir_all(out_dir).unwrap_or(());
+
+    fn walk<L: LLM>(llm: &L, src: &Path, out: &Path, lang: &str) {
+        for entry in fs::read_dir(src).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+
+            if path.is_dir() {
+                let new_out = out.join(entry.file_name());
+                fs::create_dir_all(&new_out).unwrap_or(());
+                walk(llm, &path, &new_out, lang);
+                continue;
+            }
+
+            if path.is_file() {
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                let code = llm.predict(
+                    &format!("Transpile to {}:\n{}", lang, content)
+                );
+
+                let ext = match lang {
+                    "go" => "go",
+                    "cpp" => "cpp",
+                    "swift" => "swift",
+                    "python" => "py",
+                    "rust" => "rs",
+                    _ => "txt",
+                };
+
+                let out_file = out.join(
+                    format!("{}.{}", path.file_name().unwrap().to_string_lossy(), ext)
+                );
+
+                fs::write(out_file, code).unwrap_or(());
+            }
+        }
+    }
+
+    walk(llm, Path::new(src_dir), Path::new(out_dir), lang);
+}
+
+// ==========================================================
+// FULL INTELLIGENT COMPILER STRUCT
+// ==========================================================
+pub struct Compiler<L: LLM + Clone> {
     pub llm: L,
     pub version_ai: VersionAI,
     pub semantic: SemanticEngine,
     pub security: SecurityAI<L>,
 }
 
-impl<L: LLM + Clone> IntelligentCompiler<L> {
+impl<L: LLM + Clone> Compiler<L> {
     pub fn new(llm: L) -> Self {
         Self {
             version_ai: VersionAI::new(),
             semantic: SemanticEngine,
             security: SecurityAI::new(llm.clone()),
-            llm,
+            llm
         }
     }
 
-    pub fn compile(&self, node: &Node, lang: &str) -> String {
-        let version = self.version_ai.infer(lang, node);
-
+    pub fn compile_node(&self, node: &Node, lang: &str) -> String {
+        let ver = self.version_ai.infer(lang, node);
         let sem = self.semantic.analyze(node);
-
         let base = BaseGenerator.generate(node, lang);
-
-        let refined = LLMGenerator { llm: self.llm.clone() }
-            .refine(lang, &version, &base);
-
-        let security = self.security.analyze(node);
+        let refined = LLMGenerator { llm: self.llm.clone() }.refine(lang, &ver, &base);
+        let sec = self.security.analyze(node);
 
         format!(
             "=== Intelligent Compiler ===\n\
-             Language: {}\nVersion: {}\nMeaning: {}\n\n\
-             Base Code:\n{}\n\n\
-             AI Refined Code:\n{}\n\n\
-             Security:\n{:?}",
-            lang, version, sem.meaning, base, refined, security
+            Language: {}\nVersion: {}\nMeaning: {}\n\n\
+            Base:\n{}\n\nAI:\n{}\n\nSecurity:\n{:?}",
+            lang, ver, sem.meaning, base, refined, sec
         )
     }
 }
 
-// ----------------------------------------------------------
-// CLI + MAIN
-// ----------------------------------------------------------
+// ==========================================================
+// MAIN
+// ==========================================================
 fn main() {
     println!("==============================================");
     println!("        INTELLIGENT COMPILER AI ENGINE");
     println!("==============================================");
 
-    // 테스트 노드
+    let llm = RealLLM::new();
+    let compiler = Compiler::new(llm.clone());
+
+    // Node Test
     let mut node = Node::new(NodeKind::Identifier("x".into()));
     node.meta.insert("uses_generics".into(), "true".into());
+    println!("{}", compiler.compile_node(&node, "go"));
 
-    let ic = IntelligentCompiler::new(LocalLLM {});
+    // File Transpiler Test
+    let sample = r#"
+    fn add(a: i32, b: i32) -> i32 { a + b }
+    "#;
+    println!("\n=== FILE TRANSPILER ===\n{}", transpile_source(&llm, sample, "go"));
 
-    let out = ic.compile(&node, "go");
-
-    println!("{}", out);
+    // Project Transpiler
+    println!("\n=== PROJECT TRANSPILER START ===");
+    transpile_directory(&llm, "src", "output_go", "go");
+    println!("=== PROJECT TRANSPILER DONE ===");
 
     println!("\nPress ENTER to exit...");
     let mut s = String::new();
