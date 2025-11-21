@@ -2,12 +2,13 @@
 // INTELLIGENT-COMPILER FULLSTACK AI EDITION (ONE FILE)
 // AI TRANSPILER + FILE CONVERTER + PROJECT-WIDE CONVERTER
 // Version AI + Semantic AI + Security AI + LLM CodeGen
+// Windows auto-pause fixed
 // ==========================================================
 
 use std::collections::HashMap;
-use std::io;
 use std::env;
 use std::fs;
+use std::io;
 use std::path::Path;
 use serde_json::json;
 
@@ -36,14 +37,14 @@ impl Node {
 }
 
 // ==========================================================
-// LLM BASE TRAIT
+// LLM INTERFACE
 // ==========================================================
 pub trait LLM {
     fn predict(&self, prompt: &str) -> String;
 }
 
 // ==========================================================
-// REAL LLM (OpenAI GPT) WITH AUTO API KEY DETECTION
+// REAL LLM (OPENAI GPT) WITH AUTO API KEY DETECTION
 // ==========================================================
 #[derive(Clone)]
 pub struct RealLLM {
@@ -52,17 +53,21 @@ pub struct RealLLM {
 
 impl RealLLM {
     pub fn new() -> Self {
-        // 1) 환경변수
+        // 1) ENV VAR
         if let Ok(v) = env::var("OPENAI_API_KEY") {
-            if !v.is_empty() { return Self { api_key: v }; }
+            if !v.is_empty() {
+                return Self { api_key: v };
+            }
         }
 
-        // 2) .env 파일 자동 로딩
+        // 2) .env AUTO LOAD
         if let Ok(content) = fs::read_to_string(".env") {
             for line in content.lines() {
                 if line.starts_with("OPENAI_API_KEY=") {
                     let key = line.split('=').nth(1).unwrap_or("").to_string();
-                    if !key.is_empty() { return Self { api_key: key }; }
+                    if !key.is_empty() {
+                        return Self { api_key: key };
+                    }
                 }
             }
         }
@@ -79,7 +84,7 @@ impl RealLLM {
 
         let body = json!({
             "model": "gpt-4.1",
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{ "role": "user", "content": prompt }]
         });
 
         let res = client
@@ -124,15 +129,13 @@ impl VersionAI {
     }
 
     pub fn infer(&self, lang: &str, node: &Node) -> String {
-        let Some(v) = self.map.get(lang) else {
-            return "unknown".into();
-        };
-
         if lang == "go" && node.meta.get("uses_generics") == Some(&"true".into()) {
             return "1.21".into();
         }
-
-        v.last().unwrap().to_string()
+        self.map.get(lang)
+            .and_then(|v| v.last())
+            .unwrap_or(&"unknown")
+            .to_string()
     }
 }
 
@@ -184,18 +187,20 @@ impl<L: LLM> SecurityAI<L> {
 
     pub fn analyze(&self, node: &Node) -> Vec<String> {
         let mut out = vec![];
+
         for r in &self.rules {
             if (r.detect)(node) {
                 out.push(r.name.into());
             }
         }
+
         out.push(self.llm.predict(&format!("Security check: {:?}", node)));
         out
     }
 }
 
 // ==========================================================
-// BASE CODE GENERATOR (RULE-BASED)
+// BASE CODE GENERATOR
 // ==========================================================
 pub struct BaseGenerator;
 
@@ -216,7 +221,7 @@ impl BaseGenerator {
 }
 
 // ==========================================================
-// AI REFINER
+// LLM REFINER
 // ==========================================================
 pub struct LLMGenerator<L: LLM> {
     pub llm: L,
@@ -234,13 +239,11 @@ impl<L: LLM> LLMGenerator<L> {
 // FILE TRANSPILER
 // ==========================================================
 pub fn transpile_source<L: LLM>(llm: &L, src: &str, lang: &str) -> String {
-    llm.predict(
-        &format!("Transpile entire source to {}:\n{}", lang, src)
-    )
+    llm.predict(&format!("Transpile entire source to {}:\n{}", lang, src))
 }
 
 // ==========================================================
-// PROJECT-WIDE (DIRECTORY) TRANSPILER
+// DIRECTORY-WIDE TRANSPILER
 // ==========================================================
 pub fn transpile_directory<L: LLM>(
     llm: &L,
@@ -256,14 +259,15 @@ pub fn transpile_directory<L: LLM>(
             let path = entry.path();
 
             if path.is_dir() {
-                let new_out = out.join(entry.file_name());
-                fs::create_dir_all(&new_out).unwrap_or(());
-                walk(llm, &path, &new_out, lang);
+                let next = out.join(entry.file_name());
+                fs::create_dir_all(&next).unwrap_or(());
+                walk(llm, &path, &next, lang);
                 continue;
             }
 
             if path.is_file() {
                 let content = fs::read_to_string(&path).unwrap_or_default();
+
                 let code = llm.predict(
                     &format!("Transpile to {}:\n{}", lang, content)
                 );
@@ -277,11 +281,13 @@ pub fn transpile_directory<L: LLM>(
                     _ => "txt",
                 };
 
-                let out_file = out.join(
-                    format!("{}.{}", path.file_name().unwrap().to_string_lossy(), ext)
-                );
+                let out_path = out.join(format!(
+                    "{}.{}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    ext
+                ));
 
-                fs::write(out_file, code).unwrap_or(());
+                fs::write(out_path, code).unwrap_or(());
             }
         }
     }
@@ -290,7 +296,7 @@ pub fn transpile_directory<L: LLM>(
 }
 
 // ==========================================================
-// FULL INTELLIGENT COMPILER STRUCT
+// FULL INTELLIGENT COMPILER
 // ==========================================================
 pub struct Compiler<L: LLM + Clone> {
     pub llm: L,
@@ -326,7 +332,7 @@ impl<L: LLM + Clone> Compiler<L> {
 }
 
 // ==========================================================
-// MAIN
+// MAIN (WITH WINDOWS AUTO-PAUSE)
 // ==========================================================
 fn main() {
     println!("==============================================");
@@ -336,24 +342,39 @@ fn main() {
     let llm = RealLLM::new();
     let compiler = Compiler::new(llm.clone());
 
-    // Node Test
+    // Node test
     let mut node = Node::new(NodeKind::Identifier("x".into()));
     node.meta.insert("uses_generics".into(), "true".into());
     println!("{}", compiler.compile_node(&node, "go"));
 
-    // File Transpiler Test
+    // File transpile test
+    println!("\n=== FILE TRANSPILER ===");
     let sample = r#"
-    fn add(a: i32, b: i32) -> i32 { a + b }
+        fn add(a: i32, b: i32) -> i32 { a + b }
     "#;
-    println!("\n=== FILE TRANSPILER ===\n{}", transpile_source(&llm, sample, "go"));
+    println!("{}", transpile_source(&llm, sample, "go"));
 
-    // Project Transpiler
+    // Directory transpile test
     println!("\n=== PROJECT TRANSPILER START ===");
     transpile_directory(&llm, "src", "output_go", "go");
     println!("=== PROJECT TRANSPILER DONE ===");
 
-    println!("\nPress ENTER to exit...");
-    let mut s = String::new();
-    let _ = io::stdin().read_line(&mut s);
+    // ---- Windows Fix: Prevent auto-close ----
+    println!("\nExecution finished.");
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(&["/C", "pause"])
+            .status()
+            .unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        println!("Press ENTER to exit...");
+        let mut s = String::new();
+        let _ = io::stdin().read_line(&mut s);
+    }
 }
 
