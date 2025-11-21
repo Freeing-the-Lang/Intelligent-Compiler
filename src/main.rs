@@ -37,6 +37,7 @@ pub trait LLM {
     fn predict(&self, prompt: &str) -> String;
 }
 
+#[derive(Clone)]   // <<<<<<<< 문제 해결을 위해 Clone 추가됨
 pub struct LocalLLM {}
 
 impl LLM for LocalLLM {
@@ -197,7 +198,7 @@ impl<L: LLM> SecurityAI<L> {
 // Intelligent Compiler 통합 엔진
 // ======================================================
 
-pub struct IntelligentCompilerAI<L: LLM> {
+pub struct IntelligentCompilerAI<L: LLM + Clone> {
     pub llm: L,
     pub version_ai: VersionAI,
     pub semantic: SemanticEngineAI,
@@ -246,7 +247,7 @@ impl<L: LLM + Clone> IntelligentCompilerAI<L> {
 }
 
 // ======================================================
-// 메인 함수 (창 닫힘 방지 + 엔진 테스트)
+// 메인 함수 (윈도우: 창 닫힘 방지)
 // ======================================================
 
 fn main() {
@@ -254,7 +255,6 @@ fn main() {
     println!("        Intelligent Compiler AI Engine");
     println!("==============================================");
 
-    // 테스트용 AST 노드
     let mut node = Node::new(NodeKind::Identifier("x".into()));
     node.meta.insert("uses_generics".into(), "true".to_string());
 
